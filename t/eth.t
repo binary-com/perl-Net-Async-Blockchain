@@ -10,6 +10,7 @@ use Future::AsyncAwait;
 use Net::Async::Blockchain::Transaction;
 use Net::Async::Blockchain::ETH;
 use Net::Async::Blockchain::Client::RPC::ETH;
+use Net::Async::Blockchain::Plugins::ETH::Utility;
 
 my $transaction = Net::Async::Blockchain::Transaction->new(
     currency     => 'ETH',
@@ -26,6 +27,7 @@ my $transaction = Net::Async::Blockchain::Transaction->new(
 );
 
 my $subscription_client = Net::Async::Blockchain::ETH->new();
+my $plugin_utility = Net::Async::Blockchain::Plugins::ETH::Utility->new();
 
 my $mock_rpc = Test::MockModule->new("Net::Async::Blockchain::Client::RPC::ETH");
 my $mock_eth = Test::MockModule->new("Net::Async::Blockchain::ETH");
@@ -62,9 +64,9 @@ $mock_rpc->mock(
         return {logs => []};
     });
 
-is $subscription_client->_remove_zeros("0x0f72a63496D0D5F17d3186750b65226201963716"), "0x0f72a63496D0D5F17d3186750b65226201963716",
+is $plugin_utility->_remove_zeros("0x0f72a63496D0D5F17d3186750b65226201963716"), "0x0f72a63496D0D5F17d3186750b65226201963716",
     "no zeros to be removed";
-is $subscription_client->_remove_zeros("0x000000000000000000000000000000000f72a63496D0D5F17d3186750b65226201963716"),
+is $plugin_utility->_remove_zeros("0x000000000000000000000000000000000f72a63496D0D5F17d3186750b65226201963716"),
     "0x0f72a63496D0D5F17d3186750b65226201963716", "removes only not needed zeros";
 
 $transaction = Net::Async::Blockchain::Transaction->new(
@@ -82,10 +84,13 @@ $transaction = Net::Async::Blockchain::Transaction->new(
         '0xa9059cbb0000000000000000000000002ae6d1401af58f9fbe2eda032b8494d519af5813000000000000000000000000000000000000000000000000000000003b9aca00',
 );
 
+# curl -H "Content-Type: application/json" -X POST --data '{"jsonrpc":"2.0","method":"eth_getTransactionReceipt","params":["0x382dc93eae2df291bd5e885499778ac871babba3e2c5dcbf308be7c06be84739"],"id":1}' http://localhost:8545
+my $receipt = '{"jsonrpc":"2.0","id":1,"result":{"blockHash":"0x2e16030779d881acd4306aa7d00ba9a9177b0b28d9ef334b607ff47d712e558c","blockNumber":"0x7d7da1","contractAddress":null,"cumulativeGasUsed":"0x4e68a5","from":"0x32d038a19f75b2ba4ca1d38a82192ff353c47be2","gasUsed":"0x9601","logs":[{"address":"0xdac17f958d2ee523a2206206994597c13d831ec7","topics":["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef","0x00000000000000000000000032d038a19f75b2ba4ca1d38a82192ff353c47be2","0x0000000000000000000000002ae6d1401af58f9fbe2eda032b8494d519af5813"],"data":"0x000000000000000000000000000000000000000000000000000000003b9aca00","blockNumber":"0x7d7da1","transactionHash":"0x382dc93eae2df291bd5e885499778ac871babba3e2c5dcbf308be7c06be84739","transactionIndex":"0x91","blockHash":"0x2e16030779d881acd4306aa7d00ba9a9177b0b28d9ef334b607ff47d712e558c","logIndex":"0x49","removed":false}],"logsBloom":"0x00000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000010000000000000000000020000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000400000000000000000000000100000000000000000000000000080000000000000000000000000000002000000000000000002000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000004","status":"0x1","to":"0xdac17f958d2ee523a2206206994597c13d831ec7","transactionHash":"0x382dc93eae2df291bd5e885499778ac871babba3e2c5dcbf308be7c06be84739","transactionIndex":"0x91"}}';
+
 $mock_rpc->mock(
     call => async sub {
         my ($self, $args) = @_;
-        if ($args->{data} eq Net::Async::Blockchain::ETH::SYMBOL_SIGNATURE) {
+        if ($args->{data} eq Net::Async::Blockchain::Plugins::ETH::ERC20->SYMBOL_SIGNATURE) {
             return
                 "0x000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000035553420000000000000000000000000000000000000000000000000000000000";
         } else {
@@ -93,8 +98,8 @@ $mock_rpc->mock(
         }
     });
 
-$received_transaction = $subscription_client->_check_contract_transaction($transaction)->get;
-
+my @received_transaction = $subscription_client->_check_plugins($transaction, $receipt)->get;
+is scalar @received_transaction, 1, "correct total transactions found";
 is $received_transaction->{currency}, 'USB', 'correct contract symbol';
 is $received_transaction->{to}, '0x2ae6d1401af58f9fbe2eda032b8494d519af5813', 'correct address `to`';
 is $received_transaction->{amount}->bstr(), Math::BigFloat->new(1000)->bround(6)->bstr, 'correct amount';
