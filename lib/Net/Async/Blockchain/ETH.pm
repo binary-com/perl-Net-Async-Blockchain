@@ -37,7 +37,6 @@ no indirect;
 
 use Future::AsyncAwait;
 use Ryu::Async;
-use JSON::MaybeUTF8 qw(decode_json_utf8 encode_json_utf8);
 use Math::BigInt;
 use Math::BigFloat;
 use Digest::Keccak qw(keccak_256_hex);
@@ -471,10 +470,9 @@ async sub _check_contract_transaction {
     for my $log ($logs->@*) {
         my @topics = $log->{topics}->@*;
         if (@topics && $topics[0] eq TRANSFER_EVENT_SIGNATURE) {
-            my $transaction_cp = $transaction->clone();
-
             my $address = $log->{address};
-            my $amount  = $self->get_valid_amount($log->{data});
+            next unless $address;
+            my $amount = $self->get_valid_amount($log->{data});
             next unless $amount;
 
             my $hex_symbol = await $self->rpc_client->call({
@@ -486,8 +484,6 @@ async sub _check_contract_transaction {
 
             my $symbol = $self->_to_string($hex_symbol);
             next unless $symbol;
-
-            $transaction_cp->{currency} = $symbol;
 
             my $decimals = await $self->rpc_client->call({
                     data => DECIMALS_SIGNATURE,
@@ -501,13 +497,14 @@ async sub _check_contract_transaction {
             # check will return false if the numeric is 0
             next unless $bg_decimals || eval { $bg_decimals->isa('Math::BigFloat') };
 
-            $transaction_cp->{amount} = $amount->bdiv(Math::BigInt->new(10)->bpow($bg_decimals));
+            my $transaction_cp = $transaction->clone();
+            $transaction_cp->{currency} = $symbol;
+            $transaction_cp->{amount}   = $amount->bdiv(Math::BigInt->new(10)->bpow($bg_decimals));
+            $transaction_cp->{contract} = $address;
 
             if (@topics > 1) {
                 $transaction_cp->{to} = $self->_remove_zeros($topics[2]);
             }
-
-            $transaction_cp->{contract} = $address;
 
             push @transactions, $transaction_cp;
         }
